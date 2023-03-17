@@ -1,0 +1,13 @@
+#!/bin/bash
+
+docker compose rm -svf
+docker compose up -d
+docker exec -it broker kafka-topics \
+    --create \
+    --bootstrap-server localhost:9092 \
+    --replication-factor 1 \
+    --partitions 1 \
+    --topic settopbox
+clear
+
+docker compose logs -f consumer
