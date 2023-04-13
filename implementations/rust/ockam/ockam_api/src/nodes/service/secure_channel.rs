@@ -16,7 +16,7 @@ use ockam::identity::TrustEveryonePolicy;
 use ockam::{Address, Result, Route};
 use ockam_core::api::{Request, Response, ResponseBuilder};
 use ockam_core::compat::sync::Arc;
-use ockam_core::flow_control::{FlowControlId, FlowControlPolicy};
+use ockam_core::flow_control::{FlowControlId, FlowControlPolicy, FlowControls};
 use ockam_core::route;
 
 use crate::cli_state::traits::StateTrait;
@@ -30,7 +30,7 @@ use ockam::identity::{
     SecureChannelOptions, SecureChannels, TrustMultiIdentifiersPolicy,
 };
 use ockam_multiaddr::MultiAddr;
-use ockam_node::{Context, MessageSendReceiveOptions};
+use ockam_node::Context;
 
 impl NodeManager {
     pub(crate) async fn create_secure_channel_internal(
@@ -54,19 +54,8 @@ impl NodeManager {
 
         debug!(%sc_route, "Creating secure channel");
         let timeout = timeout.unwrap_or(Duration::from_secs(120));
-        let sc_flow_control_id =
-            flow_control_id.unwrap_or_else(|| self.flow_controls.generate_id());
-        let options = SecureChannelOptions::as_producer(&self.flow_controls, &sc_flow_control_id);
-
-        // Just add ourself as consumer for the next hop if it's a producer
-        let options = match self
-            .flow_controls
-            .find_flow_control_with_producer_address(sc_route.next()?)
-            .map(|x| x.flow_control_id().clone())
-        {
-            Some(_flow_control_id) => options.as_consumer(&self.flow_controls),
-            None => options,
-        };
+        let sc_flow_control_id = flow_control_id.unwrap_or_else(|| FlowControls::generate_id());
+        let options = SecureChannelOptions::as_producer(&sc_flow_control_id);
 
         let options = match authorized_identifiers.clone() {
             Some(ids) => options.with_trust_policy(TrustMultiIdentifiersPolicy::new(ids)),
@@ -157,7 +146,6 @@ impl NodeManager {
                         ctx,
                         route![sc_addr.clone(), DefaultAddress::CREDENTIALS_SERVICE],
                         credential,
-                        MessageSendReceiveOptions::new().with_flow_control(&self.flow_controls),
                     )
                     .await?;
                 debug!(%sc_addr, "One-way credential presentation success");
@@ -180,7 +168,6 @@ impl NodeManager {
                         route![sc_addr.clone(), DefaultAddress::CREDENTIALS_SERVICE],
                         &[self.trust_context()?.authority()?.identity()],
                         credential,
-                        MessageSendReceiveOptions::new().with_flow_control(&self.flow_controls),
                     )
                     .await?;
                 debug!(%sc_addr, "Mutual credential presentation success");
@@ -211,10 +198,9 @@ impl NodeManager {
             .get_identity(vault_name.clone(), identity_name.clone())
             .await?;
 
-        let flow_control_id = self.flow_controls.generate_id();
-        let options =
-            SecureChannelListenerOptions::as_spawner(&self.flow_controls, &flow_control_id)
-                .as_consumer(&self.flow_controls);
+        let flow_control_id = FlowControls::generate_id();
+        let options = SecureChannelListenerOptions::new(&flow_control_id);
+
         let options = match authorized_identifiers {
             Some(ids) => options.with_trust_policy(TrustMultiIdentifiersPolicy::new(ids)),
             None => options.with_trust_policy(TrustEveryonePolicy),
@@ -231,26 +217,26 @@ impl NodeManager {
 
         // TODO: Clean
         // Add Echoer, Uppercase and Cred Exch as a consumer by default
-        self.flow_controls.add_consumer(
-            &DefaultAddress::ECHO_SERVICE.into(),
+        ctx.flow_controls().add_consumer(
+            DefaultAddress::ECHO_SERVICE,
             &flow_control_id,
             FlowControlPolicy::SpawnerAllowMultipleMessages,
         );
 
-        self.flow_controls.add_consumer(
-            &DefaultAddress::UPPERCASE_SERVICE.into(),
+        ctx.flow_controls().add_consumer(
+            DefaultAddress::UPPERCASE_SERVICE,
             &flow_control_id,
             FlowControlPolicy::SpawnerAllowMultipleMessages,
         );
 
-        self.flow_controls.add_consumer(
-            &DefaultAddress::CREDENTIALS_SERVICE.into(),
+        ctx.flow_controls().add_consumer(
+            DefaultAddress::CREDENTIALS_SERVICE,
             &flow_control_id,
             FlowControlPolicy::SpawnerAllowMultipleMessages,
         );
 
-        self.flow_controls.add_consumer(
-            &KAFKA_SECURE_CHANNEL_CONTROLLER_ADDRESS.into(),
+        ctx.flow_controls().add_consumer(
+            KAFKA_SECURE_CHANNEL_CONTROLLER_ADDRESS,
             &flow_control_id,
             FlowControlPolicy::SpawnerAllowMultipleMessages,
         );
@@ -409,16 +395,10 @@ impl NodeManagerWorker {
             None => None,
         };
 
-        let flow_controls;
-        {
-            let node_manager = self.node_manager.read().await;
-            flow_controls = node_manager.flow_controls.clone();
-        }
-
         // TODO: Improve error handling + move logic into CreateSecureChannelRequest
         let addr = MultiAddr::try_from(addr.as_ref()).map_err(map_multiaddr_err)?;
 
-        let connection = Connection::new(ctx, &addr, &flow_controls);
+        let connection = Connection::new(ctx, &addr);
         let connection_instance =
             NodeManager::connect(self.node_manager.clone(), connection).await?;
 
@@ -426,7 +406,6 @@ impl NodeManagerWorker {
         let result = multiaddr_to_route(
             &connection_instance.normalized_addr,
             &node_manager.tcp_transport,
-            node_manager.flow_controls(),
         )
         .await
         .ok_or_else(invalid_multiaddr_error)?;

@@ -11,7 +11,6 @@ use crate::credential::Credential;
 use crate::identity::{Identity, IdentityIdentifier};
 use crate::{CredentialData, Identities, IdentitySecureChannelLocalInfo, PROJECT_MEMBER_SCHEMA};
 use ockam_core::api::{Method, Request, Response};
-use ockam_core::flow_control::FlowControls;
 use tracing::trace;
 
 /// Legacy id for a trust context, it used to be 'project_id', not it is the more general 'trust_context_id'
@@ -142,12 +141,5 @@ impl CredentialsIssuerClient {
     /// Return a credential for the identity which initiated the secure channel
     pub async fn credential(&self) -> Result<Credential> {
         self.client.request(&Request::post("/")).await
-    }
-
-    /// Specify the flow controls to use for the RpcClient
-    pub fn with_flow_controls(self, flow_controls: &FlowControls) -> Self {
-        Self {
-            client: self.client.with_flow_controls(flow_controls),
-        }
     }
 }

@@ -2,7 +2,7 @@ use bytes::{Bytes, BytesMut};
 use core::sync::atomic::AtomicBool;
 use core::sync::atomic::Ordering;
 use ockam_core::compat::sync::Arc;
-use ockam_core::flow_control::{FlowControlId, FlowControlPolicy, FlowControls};
+use ockam_core::flow_control::{FlowControlId, FlowControlPolicy};
 use ockam_core::{
     errcode::{Kind, Origin},
     Address, AllowAll, AsyncTryClone, Encodable, Error, LocalInfo, LocalMessage, Route, Routed,
@@ -253,7 +253,7 @@ impl KafkaPortalWorker {
         uuid_to_name: TopicUuidMap,
         inlet_map: KafkaInletController,
         max_kafka_message_size: Option<u32>,
-        flow_control: Option<&(FlowControls, FlowControlId)>,
+        flow_control_id: Option<&FlowControlId>,
     ) -> ockam_core::Result<Address> {
         let shared_protocol_state = Interceptor::new(secure_channel_controller, uuid_to_name);
 
@@ -289,9 +289,9 @@ impl KafkaPortalWorker {
             )
             .await?;
 
-        if let Some((flow_controls, flow_control_id)) = flow_control {
-            flow_controls.add_consumer(
-                &responses_worker_address.clone(),
+        if let Some(flow_control_id) = flow_control_id {
+            context.flow_controls().add_consumer(
+                responses_worker_address.clone(),
                 flow_control_id,
                 FlowControlPolicy::ProducerAllowMultiple,
             );
@@ -323,7 +323,6 @@ mod test {
     use kafka_protocol::protocol::StrBytes;
     use ockam::identity::secure_channels;
     use ockam_core::compat::sync::{Arc, Mutex};
-    use ockam_core::flow_control::FlowControls;
     use ockam_core::{route, Address, AllowAll, Routed, Worker};
     use ockam_multiaddr::MultiAddr;
     use ockam_node::Context;
@@ -612,13 +611,9 @@ mod test {
         );
 
         let secure_channels = secure_channels();
-        let flow_controls = FlowControls::default();
-        let secure_channel_controller = KafkaSecureChannelControllerImpl::new(
-            secure_channels,
-            MultiAddr::default(),
-            &flow_controls,
-        )
-        .into_trait();
+        let secure_channel_controller =
+            KafkaSecureChannelControllerImpl::new(secure_channels, MultiAddr::default())
+                .into_trait();
 
         KafkaPortalWorker::start_kafka_portal(
             context,
@@ -667,11 +662,9 @@ mod test {
     ) -> ockam::Result<()> {
         let handler = crate::test::start_manager_for_tests(context).await?;
 
-        let flow_controls = FlowControls::default();
         let secure_channel_controller = KafkaSecureChannelControllerImpl::new(
             handler.secure_channels.clone(),
             MultiAddr::default(),
-            &flow_controls,
         )
         .into_trait();
 

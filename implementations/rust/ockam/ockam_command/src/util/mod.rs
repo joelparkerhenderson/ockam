@@ -21,7 +21,6 @@ use ockam_api::config::lookup::{InternetAddress, LookupMeta};
 use ockam_api::nodes::NODEMANAGER_ADDR;
 use ockam_core::api::{RequestBuilder, Response, Status};
 use ockam_core::env::get_env;
-use ockam_core::flow_control::FlowControls;
 use ockam_core::DenyAll;
 use ockam_multiaddr::proto::{DnsAddr, Ip4, Ip6, Project, Service, Space, Tcp};
 use ockam_multiaddr::{
@@ -57,7 +56,6 @@ pub struct RpcBuilder<'a> {
     node_name: String,
     to: Route,
     mode: RpcMode<'a>,
-    flow_controls: FlowControls,
 }
 
 impl<'a> RpcBuilder<'a> {
@@ -68,7 +66,6 @@ impl<'a> RpcBuilder<'a> {
             node_name: node_name.to_string(),
             to: NODEMANAGER_ADDR.into(),
             mode: RpcMode::Embedded,
-            flow_controls: Default::default(),
         }
     }
 
@@ -99,7 +96,6 @@ impl<'a> RpcBuilder<'a> {
             node_name: self.node_name,
             to: self.to,
             mode: self.mode,
-            flow_controls: self.flow_controls.clone(),
         }
     }
 }
@@ -112,7 +108,6 @@ pub struct Rpc<'a> {
     node_name: String,
     to: Route,
     mode: RpcMode<'a>,
-    flow_controls: FlowControls,
 }
 
 impl<'a> Rpc<'a> {
@@ -126,7 +121,6 @@ impl<'a> Rpc<'a> {
             node_name,
             to: NODEMANAGER_ADDR.into(),
             mode: RpcMode::Embedded,
-            flow_controls: Default::default(),
         })
     }
 
@@ -147,7 +141,6 @@ impl<'a> Rpc<'a> {
                 node_state: cfg,
                 tcp: None,
             },
-            flow_controls: Default::default(),
         })
     }
 
@@ -159,16 +152,15 @@ impl<'a> Rpc<'a> {
     where
         T: Encode<()>,
     {
-        let route = self.route_impl(self.ctx, &self.flow_controls).await?;
-        let options = MessageSendReceiveOptions::new().with_flow_control(&self.flow_controls);
+        let route = self.route_impl(self.ctx).await?;
         self.buf = self
             .ctx
-            .send_and_receive_extended::<Vec<u8>>(route.clone(), req.to_vec()?, options)
+            .send_and_receive(route.clone(), req.to_vec()?)
             .await
             .map_err(|_err| {
                 // Overwrite error to swallow inner cause and hide it from end-user
                 anyhow!("The request timed out, please make sure the command's arguments are correct or try again")
-            })?.body();
+            })?;
         Ok(())
     }
 
@@ -180,10 +172,8 @@ impl<'a> Rpc<'a> {
     where
         T: Encode<()>,
     {
-        let route = self.route_impl(self.ctx, &self.flow_controls).await?;
-        let options = MessageSendReceiveOptions::new()
-            .with_timeout(timeout)
-            .with_flow_control(&self.flow_controls);
+        let route = self.route_impl(self.ctx).await?;
+        let options = MessageSendReceiveOptions::new().with_timeout(timeout);
         self.buf = self
             .ctx
             .send_and_receive_extended::<Vec<u8>>(route.clone(), req.to_vec()?, options)
@@ -195,7 +185,7 @@ impl<'a> Rpc<'a> {
         Ok(())
     }
 
-    async fn route_impl(&self, ctx: &Context, flow_controls: &FlowControls) -> Result<Route> {
+    async fn route_impl(&self, ctx: &Context) -> Result<Route> {
         let mut to = self.to.clone();
         let route = match self.mode {
             RpcMode::Embedded => to,
@@ -208,21 +198,11 @@ impl<'a> Rpc<'a> {
                 let addr = match tcp {
                     None => {
                         let tcp = TcpTransport::create(ctx).await?;
-                        let flow_control_id = flow_controls.generate_id();
-                        tcp.connect(
-                            addr_str,
-                            TcpConnectionOptions::as_producer(flow_controls, &flow_control_id),
-                        )
-                        .await?
+                        tcp.connect(addr_str, TcpConnectionOptions::new()).await?
                     }
                     Some(tcp) => {
                         // Create a new connection anyway
-                        let flow_control_id = flow_controls.generate_id();
-                        tcp.connect(
-                            addr_str,
-                            TcpConnectionOptions::as_producer(flow_controls, &flow_control_id),
-                        )
-                        .await?
+                        tcp.connect(addr_str, TcpConnectionOptions::new()).await?
                     }
                 };
                 to.modify().prepend(addr);

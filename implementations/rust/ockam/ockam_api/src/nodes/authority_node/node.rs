@@ -1,5 +1,4 @@
 use crate::nodes::authority_node::{Authority, Configuration};
-use ockam_core::flow_control::FlowControls;
 use ockam_core::Result;
 use ockam_node::Context;
 use tracing::info;
@@ -13,52 +12,31 @@ pub async fn start_node(ctx: &Context, configuration: &Configuration) -> Result<
     let authority = Authority::create(configuration).await?;
 
     // start a secure channel listener (this also starts a TCP transport)
-    let flow_controls = FlowControls::default();
     let secure_channel_flow_control_id = authority
-        .start_secure_channel_listener(ctx, &flow_controls, configuration)
+        .start_secure_channel_listener(ctx, configuration)
         .await?;
 
     // start the authenticator services
     authority
-        .start_direct_authenticator(
-            ctx,
-            &flow_controls,
-            &secure_channel_flow_control_id,
-            configuration,
-        )
+        .start_direct_authenticator(ctx, &secure_channel_flow_control_id, configuration)
         .await?;
 
     authority
-        .start_enrollment_services(
-            ctx,
-            &flow_controls,
-            &secure_channel_flow_control_id,
-            configuration,
-        )
+        .start_enrollment_services(ctx, &secure_channel_flow_control_id, configuration)
         .await?;
 
     authority
-        .start_credential_issuer(
-            ctx,
-            &flow_controls,
-            &secure_channel_flow_control_id,
-            configuration,
-        )
+        .start_credential_issuer(ctx, &secure_channel_flow_control_id, configuration)
         .await?;
 
     // start the Okta service (if the optional configuration has been provided)
     authority
-        .start_okta(
-            ctx,
-            &flow_controls,
-            &secure_channel_flow_control_id,
-            configuration,
-        )
+        .start_okta(ctx, &secure_channel_flow_control_id, configuration)
         .await?;
 
     // start an echo service so that the node can be queried as healthy
     authority
-        .start_echo_service(ctx, &flow_controls, &secure_channel_flow_control_id)
+        .start_echo_service(ctx, &secure_channel_flow_control_id)
         .await?;
 
     info!(

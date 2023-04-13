@@ -3,6 +3,7 @@ use crate::stream::Stream;
 use core::time::Duration;
 use ockam_core::compat::string::String;
 use ockam_core::compat::sync::Arc;
+use ockam_core::flow_control::FlowControls;
 use ockam_core::{
     Address, IncomingAccessControl, Message, OutgoingAccessControl, Processor, Result, Route,
     Routed, Worker,
@@ -61,6 +62,11 @@ pub fn node(ctx: Context) -> Node {
 }
 
 impl Node {
+    /// Return the node's [`FlowControls`]
+    pub fn flow_controls(&self) -> &FlowControls {
+        self.context.flow_controls()
+    }
+
     /// Return the current context
     pub fn context(&self) -> &Context {
         &self.context

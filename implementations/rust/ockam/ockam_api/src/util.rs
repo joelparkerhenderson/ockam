@@ -53,7 +53,6 @@ pub struct MultiAddrToRouteResult {
 pub async fn multiaddr_to_route(
     ma: &MultiAddr,
     tcp: &TcpTransport,
-    flow_controls: &FlowControls,
 ) -> Option<MultiAddrToRouteResult> {
     let mut rb = Route::new();
     let mut it = ma.iter().peekable();
@@ -73,14 +72,9 @@ pub async fn multiaddr_to_route(
                 let port = it.next()?.cast::<Tcp>()?;
                 let socket_addr = SocketAddrV4::new(*ip4, *port);
 
-                let options = if socket_addr.ip().is_loopback() {
-                    // TODO: Enable FlowControl for loopback addresses as well
-                    TcpConnectionOptions::insecure()
-                } else {
-                    let id = flow_controls.generate_id();
-                    flow_control_id = Some(id.clone());
-                    TcpConnectionOptions::as_producer(flow_controls, &id)
-                };
+                let id = FlowControls::generate_id();
+                flow_control_id = Some(id.clone());
+                let options = TcpConnectionOptions::as_producer(&id);
 
                 let addr = tcp.connect(socket_addr.to_string(), options).await.ok()?;
                 tcp_worker = Some(addr.clone());
@@ -97,14 +91,9 @@ pub async fn multiaddr_to_route(
                 let port = it.next()?.cast::<Tcp>()?;
                 let socket_addr = SocketAddrV6::new(*ip6, *port, 0, 0);
 
-                let options = if socket_addr.ip().is_loopback() {
-                    // TODO: Enable FlowControl for loopback addresses as well
-                    TcpConnectionOptions::insecure()
-                } else {
-                    let id = flow_controls.generate_id();
-                    flow_control_id = Some(id.clone());
-                    TcpConnectionOptions::as_producer(flow_controls, &id)
-                };
+                let id = FlowControls::generate_id();
+                flow_control_id = Some(id.clone());
+                let options = TcpConnectionOptions::as_producer(&id);
 
                 let addr = tcp.connect(socket_addr.to_string(), options).await.ok()?;
                 tcp_worker = Some(addr.clone());
@@ -122,9 +111,9 @@ pub async fn multiaddr_to_route(
                     if p.code() == Tcp::CODE {
                         let port = p.cast::<Tcp>()?;
 
-                        let id = flow_controls.generate_id();
+                        let id = FlowControls::generate_id();
                         flow_control_id = Some(id.clone());
-                        let options = TcpConnectionOptions::as_producer(flow_controls, &id);
+                        let options = TcpConnectionOptions::as_producer(&id);
 
                         let addr = tcp
                             .connect(format!("{}:{}", &*host, *port), options)
@@ -347,7 +336,6 @@ pub mod test {
     use ockam::identity::{Identity, SecureChannels};
     use ockam::Result;
     use ockam_core::compat::sync::Arc;
-    use ockam_core::flow_control::FlowControls;
     use ockam_core::AsyncTryClone;
     use ockam_node::compat::asynchronous::RwLock;
     use ockam_node::Context;
@@ -364,7 +352,6 @@ pub mod test {
         pub tcp: TcpTransport,
         pub secure_channels: Arc<SecureChannels>,
         pub identity: Identity,
-        pub flow_controls: FlowControls,
     }
 
     impl Drop for NodeManagerHandle {
@@ -433,7 +420,6 @@ pub mod test {
 
         let mut node_manager_worker = NodeManagerWorker::new(node_manager);
         let node_manager = node_manager_worker.get().clone();
-        let flow_controls = node_manager.read().await.flow_controls.clone();
         let secure_channels = node_manager.read().await.secure_channels.clone();
         context
             .start_worker(
@@ -450,7 +436,6 @@ pub mod test {
             tcp: tcp.async_try_clone().await?,
             secure_channels: secure_channels.clone(),
             identity: identity.clone(),
-            flow_controls,
         })
     }
 }

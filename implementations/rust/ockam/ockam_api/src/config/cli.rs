@@ -6,7 +6,6 @@ use crate::config::{lookup::ConfigLookup, ConfigValues};
 use crate::error::ApiError;
 use crate::{cli_state, multiaddr_to_transport_route, DefaultAddress, HexByteVec};
 use ockam_core::compat::sync::Arc;
-use ockam_core::flow_control::FlowControls;
 use ockam_core::{Result, Route};
 use ockam_identity::credential::Credential;
 use ockam_identity::{
@@ -113,28 +112,27 @@ impl TrustContextConfig {
         secure_channels: Arc<SecureChannels>,
         tcp_transport: Option<TcpTransport>,
     ) -> Result<TrustContext> {
-        let authority =
-            if let Some(authority_config) = self.authority.as_ref() {
-                let identity = authority_config.identity().await?;
-                let credential_retriever =
-                    if let Some(retriever_type) = &authority_config.own_credential {
-                        Some(retriever_type.to_credential_retriever(
-                            secure_channels.clone(),
-                            tcp_transport,
-                            Default::default(), /* FIXME: Replace with proper shared instance */
-                        ).await?)
-                    } else {
-                        None
-                    };
+        let authority = if let Some(authority_config) = self.authority.as_ref() {
+            let identity = authority_config.identity().await?;
+            let credential_retriever =
+                if let Some(retriever_type) = &authority_config.own_credential {
+                    Some(
+                        retriever_type
+                            .to_credential_retriever(secure_channels.clone(), tcp_transport)
+                            .await?,
+                    )
+                } else {
+                    None
+                };
 
-                Some(AuthorityService::new(
-                    secure_channels.identities().credentials(),
-                    identity,
-                    credential_retriever,
-                ))
-            } else {
-                None
-            };
+            Some(AuthorityService::new(
+                secure_channels.identities().credentials(),
+                identity,
+                credential_retriever,
+            ))
+        } else {
+            None
+        };
 
         Ok(TrustContext::new(self.id.clone(), authority))
     }
@@ -275,7 +273,6 @@ impl CredentialRetrieverConfig {
         &self,
         secure_channels: Arc<SecureChannels>,
         tcp_transport: Option<TcpTransport>,
-        flow_controls: FlowControls,
     ) -> Result<Arc<dyn CredentialsRetriever>> {
         match self {
             CredentialRetrieverConfig::FromMemory(credential) => Ok(Arc::new(
@@ -295,7 +292,6 @@ impl CredentialRetrieverConfig {
                 Ok(Arc::new(RemoteCredentialsRetriever::new(
                     secure_channels,
                     credential_issuer_info,
-                    flow_controls,
                 )))
             }
         }

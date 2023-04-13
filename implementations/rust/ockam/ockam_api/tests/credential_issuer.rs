@@ -5,8 +5,8 @@ use ockam::identity::credential::Timestamp;
 use ockam::identity::{identities, AttributesEntry, IdentitiesStorage};
 use ockam::route;
 use ockam_api::bootstrapped_identities_store::{BootstrapedIdentityStore, PreTrustedIdentities};
-use ockam_core::compat::rand::random_string;
-use ockam_core::{AllowAll, Result};
+use ockam_core::flow_control::{FlowControlPolicy, FlowControls};
+use ockam_core::{Address, AllowAll, Result};
 use ockam_identity::{
     CredentialsIssuer, CredentialsIssuerClient, Identities, SecureChannelListenerOptions,
     SecureChannelOptions, SecureChannels,
@@ -15,8 +15,8 @@ use ockam_node::Context;
 
 #[ockam_macros::test]
 async fn credential(ctx: &mut Context) -> Result<()> {
-    let api_worker_addr = random_string();
-    let auth_worker_addr = random_string();
+    let api_worker_addr = Address::random_local();
+    let auth_worker_addr = Address::random_local();
 
     // create 2 identities to populate the trusted identities
     let identities = identities();
@@ -53,14 +53,20 @@ async fn credential(ctx: &mut Context) -> Result<()> {
     let identities_creation = identities.identities_creation();
 
     // Create the CredentialIssuer:
+    let sc_flow_control_id = FlowControls::generate_id();
     secure_channels
         .create_secure_channel_listener(
             ctx,
             &auth_identity,
-            &api_worker_addr,
-            SecureChannelListenerOptions::new(),
+            api_worker_addr.clone(),
+            SecureChannelListenerOptions::new(&sc_flow_control_id),
         )
         .await?;
+    ctx.flow_controls().add_consumer(
+        auth_worker_addr.clone(),
+        &sc_flow_control_id,
+        FlowControlPolicy::SpawnerAllowMultipleMessages,
+    );
     let auth = CredentialsIssuer::new(
         identities.clone(),
         auth_identity.clone(),
@@ -68,7 +74,7 @@ async fn credential(ctx: &mut Context) -> Result<()> {
     )
     .await?;
     ctx.start_worker(
-        &auth_worker_addr,
+        auth_worker_addr.clone(),
         auth,
         AllowAll, // In reality there is ABAC rule here.
         AllowAll,
@@ -80,12 +86,12 @@ async fn credential(ctx: &mut Context) -> Result<()> {
         .create_secure_channel(
             ctx,
             &member_identity,
-            &api_worker_addr,
+            api_worker_addr,
             SecureChannelOptions::new(),
         )
         .await?;
     // Add the member via the enroller's connection:
-    let c = CredentialsIssuerClient::new(route![e2a.address(), &auth_worker_addr], ctx).await?;
+    let c = CredentialsIssuerClient::new(route![e2a.address(), auth_worker_addr], ctx).await?;
     // Get a fresh member credential and verify its validity:
     let credential = c.credential().await?;
     let exported = member_identity.export()?;
