@@ -11,6 +11,7 @@ use ockam_multiaddr::MultiAddr;
 pub mod addon;
 pub mod enroll;
 pub mod lease_manager;
+pub mod operation;
 pub mod project;
 pub mod space;
 pub mod subscription;

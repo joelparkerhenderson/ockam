@@ -16,6 +16,7 @@ mod manpages;
 mod markdown;
 mod message;
 mod node;
+mod operation;
 mod policy;
 mod project;
 mod relay;

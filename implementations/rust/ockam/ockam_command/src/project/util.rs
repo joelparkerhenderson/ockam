@@ -169,51 +169,15 @@ async fn delete_secure_channel<'a>(
     Ok(())
 }
 
-pub async fn check_project_readiness<'a>(
+pub async fn establish_connections<'a>(
     ctx: &ockam::Context,
     opts: &CommandGlobalOpts,
-    cloud_opts: &CloudOpts,
     api_node: &str,
     tcp: Option<&TcpTransport>,
-    mut project: Project<'a>,
+    project: Project<'a>,
 ) -> Result<Project<'a>> {
-    // Total of 10 Mins sleep strategy with 5 second intervals between each retry
     let total_sleep_time_ms = 10 * 60 * 1000;
     let retry_strategy = FixedInterval::from_millis(5000).take(total_sleep_time_ms / 5000);
-
-    // Persist project config prior to checking readiness which might take a while
-    config::set_project_id(&opts.config, &project).await?;
-
-    // Check if Project and Project Authority info is available
-    println!("Project created!");
-    if !project.is_ready() {
-        print!("Waiting for it to be ready...");
-        let cloud_route = &cloud_opts.route();
-        let project_id = project.id.clone();
-        project = Retry::spawn(retry_strategy.clone(), || async {
-            std::io::stdout().flush()?;
-            let mut rpc = RpcBuilder::new(ctx, opts, api_node).build();
-
-            // Handle the project show request result
-            // so we can provide better errors in the case orchestrator does not respond timely
-            if rpc
-                .request(api::project::show(&project_id, cloud_route))
-                .await
-                .is_ok()
-            {
-                let p = rpc.parse_response::<Project>()?;
-                if p.is_ready() {
-                    println!(" {}", "✔︎".light_green());
-                    return Ok(p.to_owned());
-                }
-            }
-            print!(".");
-            Err(anyhow!("Project creation timed out. Plaese try again."))
-        })
-        .await?;
-
-        println!();
-    }
 
     {
         print!("Establishing connection (this can take a few minutes)...");
@@ -309,6 +273,57 @@ pub async fn check_project_readiness<'a>(
 
         println!();
     }
+
+    Ok(project)
+}
+
+pub async fn check_project_readiness<'a>(
+    ctx: &ockam::Context,
+    opts: &CommandGlobalOpts,
+    cloud_opts: &CloudOpts,
+    api_node: &str,
+    tcp: Option<&TcpTransport>,
+    mut project: Project<'a>,
+) -> Result<Project<'a>> {
+    // Total of 10 Mins sleep strategy with 5 second intervals between each retry
+    let total_sleep_time_ms = 10 * 60 * 1000;
+    let retry_strategy = FixedInterval::from_millis(5000).take(total_sleep_time_ms / 5000);
+
+    // Persist project config prior to checking readiness which might take a while
+    config::set_project_id(&opts.config, &project).await?;
+
+    // Check if Project and Project Authority info is available
+    println!("Project created!");
+    if !project.is_ready() {
+        print!("Waiting for it to be ready...");
+        let cloud_route = &cloud_opts.route();
+        let project_id = project.id.clone();
+        project = Retry::spawn(retry_strategy.clone(), || async {
+            std::io::stdout().flush()?;
+            let mut rpc = RpcBuilder::new(ctx, opts, api_node).build();
+
+            // Handle the project show request result
+            // so we can provide better errors in the case orchestrator does not respond timely
+            if rpc
+                .request(api::project::show(&project_id, cloud_route))
+                .await
+                .is_ok()
+            {
+                let p = rpc.parse_response::<Project>()?;
+                if p.is_ready() {
+                    println!(" {}", "✔︎".light_green());
+                    return Ok(p.to_owned());
+                }
+            }
+            print!(".");
+            Err(anyhow!("Project creation timed out. Plaese try again."))
+        })
+        .await?;
+
+        println!();
+    }
+
+    let project = establish_connections(ctx, opts, api_node, tcp, project).await?;
 
     // Persist project config with all its fields
     config::set_project(&opts.config, &project).await?;
