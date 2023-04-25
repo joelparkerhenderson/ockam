@@ -67,7 +67,7 @@ error() {
   fi
 
   echo
-  echo "   If you need help, please start a discussion on Github:"
+  echo "   If you need help, please start a discussion on GitHub:"
   echo "   https://github.com/build-trust/ockam/discussions/new"
   echo
 
@@ -377,7 +377,7 @@ main() {
   echo
   heading "FEEDBACK:"
   echo "   If you have any questions or feedback, please start a discussion"
-  echo "   on Github https://github.com/build-trust/ockam/discussions/new"
+  echo "   on GitHub https://github.com/build-trust/ockam/discussions/new"
   echo
 
   exit 0
