@@ -89,6 +89,7 @@ pem-rfc7468 = { version = "0.7.0", features = ["std"] }
 rand = "0.8"
 regex = "1.7.1"
 reqwest = { version = "0.11", default-features = false, features = ["json", "rustls-tls-native-roots"] }
+rolling-file = { version = "0.2.0", default-features = false }
 rustls = "0.21.0"
 rustls-native-certs = "0.6.2"
 serde = { version = "1", features = ["derive"] }
@@ -105,7 +106,8 @@ thiserror = "1"
 tokio = { version = "1.27.0", features = ["full"] }
 tokio-retry = "0.3"
 tracing = { version = "0.1.31", features = ["attributes"] }
-tracing-error = "0.2"
+tracing-appender = "0.2.2"
+tracing-error = "0.2.0"
 tracing-subscriber = "0.3.9"
 validator = "0.16"
 

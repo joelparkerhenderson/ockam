@@ -1,4 +1,5 @@
 use core::time::Duration;
+use std::path::PathBuf;
 use std::{
     net::{SocketAddr, TcpListener},
     path::Path,
@@ -7,9 +8,11 @@ use std::{
 
 use anyhow::{anyhow, Context as _};
 use minicbor::{data::Type, Decode, Decoder, Encode};
+use rolling_file::{RollingConditionBasic, RollingFileAppender};
 use tracing::{debug, error, trace};
+use tracing_appender::non_blocking::WorkerGuard;
 use tracing_subscriber::prelude::*;
-use tracing_subscriber::{filter::LevelFilter, fmt, EnvFilter};
+use tracing_subscriber::{filter::LevelFilter, EnvFilter};
 
 pub use config::*;
 use ockam::{
@@ -466,7 +469,11 @@ pub fn find_available_port() -> Result<u16> {
     Ok(address.port())
 }
 
-pub fn setup_logging(verbose: u8, no_color: bool) {
+pub fn setup_logging(
+    verbose: u8,
+    no_color: bool,
+    log_path: Option<PathBuf>,
+) -> Option<WorkerGuard> {
     let ockam_crates = [
         "ockam",
         "ockam_node",
@@ -484,7 +491,7 @@ pub fn setup_logging(verbose: u8, no_color: bool) {
     let filter = match verbose {
         0 => match get_env::<String>("OCKAM_LOG") {
             Ok(Some(s)) if !s.is_empty() => builder.with_env_var("OCKAM_LOG").from_env_lossy(),
-            _ => return,
+            _ => return None,
         },
         1 => builder
             .with_default_directive(LevelFilter::INFO.into())
@@ -496,15 +503,35 @@ pub fn setup_logging(verbose: u8, no_color: bool) {
             .with_default_directive(LevelFilter::TRACE.into())
             .parse_lossy(ockam_crates.map(|c| format!("{c}=trace")).join(",")),
     };
-    let fmt = fmt::Layer::default().with_ansi(!no_color);
-    let result = tracing_subscriber::registry()
+    let subscriber = tracing_subscriber::registry()
         .with(filter)
-        .with(tracing_error::ErrorLayer::default())
-        .with(fmt)
-        .try_init();
-    if result.is_err() {
-        eprintln!("Failed to initialise tracing logging.");
-    }
+        .with(tracing_error::ErrorLayer::default());
+    let (subscriber, guard) = match log_path {
+        None => {
+            let (n, guard) = tracing_appender::non_blocking(std::io::stdout());
+            let fmt = tracing_subscriber::fmt::Layer::default()
+                .with_ansi(!no_color)
+                .with_writer(n);
+            (subscriber.with(fmt).try_init(), guard)
+        }
+        Some(log_path) => {
+            let r = RollingFileAppender::new(
+                log_path,
+                RollingConditionBasic::new()
+                    .daily()
+                    .max_size(100 * 1024 * 1024), // Rotate every 100 MB or day
+                60, // Up to 6 GB or 60 days
+            )
+            .expect("Failed to create rolling file appender");
+            let (n, guard) = tracing_appender::non_blocking(r);
+            let fmt = tracing_subscriber::fmt::Layer::default()
+                .with_ansi(!no_color)
+                .with_writer(n);
+            (subscriber.with(fmt).try_init(), guard)
+        }
+    };
+    subscriber.expect("Failed to initialize tracing subscriber");
+    Some(guard)
 }
 
 #[allow(unused)]

@@ -37,6 +37,7 @@ mod worker;
 
 use crate::admin::AdminCommand;
 use crate::authority::AuthorityCommand;
+use crate::node::NodeSubcommand;
 use crate::run::RunCommand;
 use crate::subscription::SubscriptionCommand;
 use crate::terminal::{Terminal, TerminalStream};
@@ -63,6 +64,7 @@ use secure_channel::{listener::SecureChannelListenerCommand, SecureChannelComman
 use service::ServiceCommand;
 use space::SpaceCommand;
 use status::StatusCommand;
+use std::path::PathBuf;
 use tcp::{
     connection::TcpConnectionCommand, inlet::TcpInletCommand, listener::TcpListenerCommand,
     outlet::TcpOutletCommand,
@@ -297,19 +299,27 @@ pub fn run() {
         check_if_an_upgrade_is_available();
     }
 
-    if !command.global_args.quiet {
-        setup_logging(command.global_args.verbose, command.global_args.no_color);
-        tracing::debug!("{}", Version::short());
-        tracing::debug!("Parsed {:?}", command);
-    }
-
     command.run();
 }
 
 impl OckamCommand {
     pub fn run(self) {
         let config = OckamConfig::load().expect("Failed to load config");
-        let options = CommandGlobalOpts::new(self.global_args, config);
+        let options = CommandGlobalOpts::new(self.global_args.clone(), config);
+
+        let _tracing_guard = if !options.global_args.quiet {
+            let log_path = self.log_path(&options);
+            let guard = setup_logging(
+                options.global_args.verbose,
+                options.global_args.no_color,
+                log_path,
+            );
+            tracing::debug!("{}", Version::short());
+            tracing::debug!("Parsed {:?}", &self);
+            guard
+        } else {
+            None
+        };
 
         // If test_argument_parser is true, command arguments are checked
         // but the command is not executed. This is useful to test arguments
@@ -357,6 +367,17 @@ impl OckamCommand {
             OckamSubcommand::Manpages(c) => c.run(),
             OckamSubcommand::TrustContext(c) => c.run(options),
         }
+    }
+
+    fn log_path(&self, opts: &CommandGlobalOpts) -> Option<PathBuf> {
+        if let OckamSubcommand::Node(c) = &self.subcommand {
+            if let NodeSubcommand::Create(c) = &c.subcommand {
+                if let Ok(s) = opts.state.nodes.get(&c.node_name) {
+                    return Some(s.stdout_log());
+                }
+            }
+        }
+        None
     }
 }
 
